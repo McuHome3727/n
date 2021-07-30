@@ -1,0 +1,149 @@
+
+# 优化 Mysql
+
+首先根据根据资料对 MySQL 的内存使用进行调优。根据需要对下列参数进行调整，然后重启 mysql 服务并使用 vmstat 观察内存使用情况。
+
+
+[mysqld]
+key_buffer_size = 8
+ 
+# Tuning
+key_buffer = 32M
+thread_stack = 192K
+thread_cache_size = 2
+innodb_buffer_pool_size = 8M
+innodb_buffer_pool_size = 8M
+max_connections = 50
+max_allowed_packet = 1M
+query_cache_limit = 2M
+query_cache_size = 16M
+tmp_table_size = 32M
+table_open_cache = 64
+thread_concurrency = 4
+
+最后简单写了个脚本加在 crontab 里每分钟执行一次，用来在 MySQL 万一崩溃了之后可以立即重启 MySQL 服务。脚本内容如下：
+
+#!/bin/bash
+ 
+ps -ef | grep mysqld | grep -v grep
+mysqld=$?
+ 
+if [[ "$mysqld" == "1" ]]; then
+  service mysqld start
+fi
+
+
+# 优化 Apache
+
+在 /etc/httpd/conf.modules.d/00-mpm.conf 中包含如下内容：
+
+```shell
+
+# Select the MPM module which should be used by uncommenting exactly
+# one of the following LoadModule lines.
+ 
+# prefork MPM: Implements a non-threaded, pre-forking web server
+# See: http://httpd.apache.org/docs/2.4/mod/prefork.html
+#
+# NOTE: If enabling prefork, the httpd_graceful_shutdown SELinux
+# boolean should be enabled, to allow graceful stop/shutdown.
+#
+LoadModule mpm_prefork_module modules/mod_mpm_prefork.so
+ 
+# worker MPM: Multi-Processing Module implementing a hybrid
+# multi-threaded multi-process web server
+# See: http://httpd.apache.org/docs/2.4/mod/worker.html
+#
+#LoadModule mpm_worker_module modules/mod_mpm_worker.so
+ 
+# event MPM: A variant of the worker MPM with the goal of consuming
+# threads only for connections with active processing
+# See: http://httpd.apache.org/docs/2.4/mod/event.html
+#
+#LoadModule mpm_event_module modules/mod_mpm_event.so
+
+```
+Apache 默认是启用 mod_mpm_prefork.so，针对这种 MPM 管理模块将下列配置添加到 Apache 配置文件 /etc/httpd/conf/httpd.conf 中
+
+
+```shell
+
+KeepAlive On
+MaxKeepAliveRequests 100
+KeepAliveTimeout 2
+ 
+<IfModule prefork.c>
+    StartServers       4
+    MinSpareServers    4
+    MaxSpareServers    8
+    ServerLimit       10
+    MaxClients        10
+    MaxRequestsPerChild  40
+</IfModule>
+
+```
+
+如果使用的是 mod_mpm_event.so ，它是一种更加轻量级的 MPM 模块，使用的内存更少。将 mod_mpm_prefork.so 注释掉，然后将模块 mod_mpm_event.so 前的注释去掉，修改相应的 Apache 配置如下：
+
+```shell
+
+<IfModule mpm_event_module>
+    StartServers 2
+    MinSpareThreads 25
+    MaxSpareThreads 75
+    ThreadLimit 64
+    ThreadsPerChild 25
+    MaxRequestWorkers 150
+    MaxConnectionsPerChild 0
+</IfModule>
+
+```
+
+升级 PHP 到较新版本
+
+
+
+
+
+首先停止 Apache 服务并且移除老版本的 PHP：
+
+```
+$ sudo service httpd stop 
+$ sudo yum remove php70-cli php70-common \
+```
+
+php70-json php70-mysqlnd php70-pdo php70-process php70-xml
+然后直接安装新版本的 PHP 即可：
+
+```
+$ sudo yum install php73 php73-mysqlnd php73-cli \
+php73-common php73-json php73-fpm
+
+```
+
+使用 PHP-FPM 模块
+配置 PHP-FPM 如下：/etc/php-fpm.d/www.conf
+
+```
+; The address on which to accept FastCGI requests.
+; listen = /var/run/php-fpm/www.sock
+listen = 127.0.0.1:9000
+listen.acl_users = apache
+pm.max_children = 16
+pm.start_servers = 3
+pm.min_spare_servers = 2
+pm.max_spare_servers = 5
+```
+
+然后就可以启动 PHP-FPM 服务：
+
+```
+$ sudo service php-fpm restart
+```
+
+再观察可以发现 PHP-FPM 已经监听在 9000 端口，然后将如下配置添加到 Apache 的 VirtualHost 里即可。我这里是使用的 HTTPS，因此 VirtualHost 监听的是 443 端口：
+```
+<VirtualHost _default_:443>
+ProxyPassMatch ^/(.*\.php(/.*)?)$ fcgi://127.0.0.1:9000/var/www/html/$1
+</VirtualHost>
+```
