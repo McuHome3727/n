@@ -20,3 +20,10 @@ ATTINY1614 UPDI
 	https://github.com/SpenceKonde/AVR-Guidance/blob/master/UPDI/jtag2updi.md
 	https://www.tindie.com/products/drazzy/attiny16141604-dev-board-arduino-compatible/ 
 	
+STM32
+	https://github.com/lvgl/lvgl
+	https://github.com/FASTSHIFT/WatchX		手表
+			https://www.bilibili.com/video/BV1AK4y1b7Xd	
+	https://github.com/FASTSHIFT/X-TRACK	自行車碼表
+			
+	
